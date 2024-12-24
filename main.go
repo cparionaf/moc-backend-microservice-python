@@ -3,7 +3,7 @@ package main
 import (
     "context"
     "encoding/json"
-    "fmt"
+    "io"
     "log"
     "net/http"
     "os"
@@ -11,16 +11,29 @@ import (
 
     "github.com/aws/aws-sdk-go-v2/config"
     "github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
-    "github.com/aws/aws-sdk-go-v2/service/ec2"
 )
 
 // ServerInfo contiene información detallada sobre la instancia y región
 type ServerInfo struct {
-    Region          string    `json:"region"`
-    AvailabilityZone string   `json:"availability_zone"`
-    InstanceID      string    `json:"instance_id"`
-    InstanceType    string    `json:"instance_type"`
-    TimeStamp       time.Time `json:"timestamp"`
+    Region           string    `json:"region"`
+    AvailabilityZone string    `json:"availability_zone"`
+    InstanceID       string    `json:"instance_id"`
+    InstanceType     string    `json:"instance_type"`
+    TimeStamp        time.Time `json:"timestamp"`
+}
+
+// readMetadata es una función auxiliar para leer el contenido del ReadCloser
+func readMetadata(content io.ReadCloser) (string, error) {
+    // Es importante cerrar el reader cuando terminemos
+    defer content.Close()
+    
+    // Leemos todo el contenido
+    bytes, err := io.ReadAll(content)
+    if err != nil {
+        return "", err
+    }
+    
+    return string(bytes), nil
 }
 
 func main() {
@@ -59,34 +72,48 @@ func getServerInfoHandler(w http.ResponseWriter, r *http.Request) {
     region, err := imdsClient.GetRegion(ctx, &imds.GetRegionInput{})
     if err != nil {
         log.Printf("Error al obtener región desde IMDS: %v", err)
-        // Fallback a la región de la configuración
         info.Region = cfg.Region
     } else {
         info.Region = region.Region
     }
 
     // Obtener zona de disponibilidad
-    az, err := imdsClient.GetMetadata(ctx, &imds.GetMetadataInput{
+    azOutput, err := imdsClient.GetMetadata(ctx, &imds.GetMetadataInput{
         Path: "placement/availability-zone",
     })
-    if err == nil {
-        info.AvailabilityZone = az
+    if err == nil && azOutput != nil {
+        if azContent, err := readMetadata(azOutput.Content); err == nil {
+            info.AvailabilityZone = azContent
+            log.Printf("AZ obtenida: %s", azContent)
+        } else {
+            log.Printf("Error leyendo AZ: %v", err)
+        }
     }
 
     // Obtener ID de instancia
-    instanceID, err := imdsClient.GetMetadata(ctx, &imds.GetMetadataInput{
+    instanceIDOutput, err := imdsClient.GetMetadata(ctx, &imds.GetMetadataInput{
         Path: "instance-id",
     })
-    if err == nil {
-        info.InstanceID = instanceID
+    if err == nil && instanceIDOutput != nil {
+        if idContent, err := readMetadata(instanceIDOutput.Content); err == nil {
+            info.InstanceID = idContent
+            log.Printf("Instance ID obtenido: %s", idContent)
+        } else {
+            log.Printf("Error leyendo Instance ID: %v", err)
+        }
     }
 
     // Obtener tipo de instancia
-    instanceType, err := imdsClient.GetMetadata(ctx, &imds.GetMetadataInput{
+    instanceTypeOutput, err := imdsClient.GetMetadata(ctx, &imds.GetMetadataInput{
         Path: "instance-type",
     })
-    if err == nil {
-        info.InstanceType = instanceType
+    if err == nil && instanceTypeOutput != nil {
+        if typeContent, err := readMetadata(instanceTypeOutput.Content); err == nil {
+            info.InstanceType = typeContent
+            log.Printf("Instance Type obtenido: %s", typeContent)
+        } else {
+            log.Printf("Error leyendo Instance Type: %v", err)
+        }
     }
 
     // Enviar respuesta

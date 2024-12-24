@@ -1,29 +1,23 @@
-# Usar la imagen oficial de Go como base
+# Build stage
 FROM golang:1.23 AS builder
-
-# Establecer el directorio de trabajo
 WORKDIR /app
 
-# Copiar los archivos go.mod y go.sum
+# Copy dependency files
 COPY go.mod go.sum ./
-
-# Descargar dependencias
 RUN go mod download
 
-# Copiar el código fuente
+# Copy source code
 COPY . .
 
-# Compilar la aplicación
+# Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -o main .
 
-# Imagen final
+# Final stage
 FROM alpine:latest
+WORKDIR /app
 
-# Copiar el ejecutable compilado
-COPY --from=builder /app/main /app/main
+# Copy binary from builder
+COPY --from=builder /app/main .
 
-# Exponer el puerto 8080
-EXPOSE 8080
-
-# Ejecutar la aplicación
-CMD ["/app/main"]
+# Run the application
+CMD ["./main"]
